@@ -9,10 +9,20 @@ from strategy import apply_strategy
 from backtester import run_backtest
 from metrics import calculate_metrics
 
-# Page config
+# Page config (MUST be first Streamlit command)
 st.set_page_config(page_title="Trading AI Platform", layout="wide")
 
-# Dark theme styling
+# Sidebar
+st.sidebar.header("⚙️ Configuration")
+
+symbol = st.sidebar.text_input("Symbol", "AAPL")
+strategy_type = st.sidebar.selectbox("Strategy", ["Rule-Based", "AI-Based"])
+initial_balance = st.sidebar.number_input("Initial Balance", value=10000)
+auto_mode = st.sidebar.checkbox("Enable Auto Trading (Paper)")
+
+run = st.sidebar.button("Run Backtest")
+
+# Dark theme
 st.markdown("""
 <style>
 body { background-color: #0e1117; color: white; }
@@ -23,15 +33,6 @@ body { background-color: #0e1117; color: white; }
 
 # Title
 st.title("📊 AI Trading Backtesting Dashboard")
-
-# Sidebar
-st.sidebar.header("⚙️ Configuration")
-
-symbol = st.sidebar.text_input("Symbol", "AAPL")
-strategy_type = st.sidebar.selectbox("Strategy", ["Rule-Based", "AI-Based"])
-initial_balance = st.sidebar.number_input("Initial Balance", value=10000)
-
-run = st.sidebar.button("Run Backtest")
 
 # ================= MAIN LOGIC =================
 if run:
@@ -46,11 +47,13 @@ if run:
     else:
         df = apply_strategy(df)
 
-    # Run backtest
+    # 🔥 IMPORTANT (you missed this)
     final_value, trades, df = run_backtest(df, initial_balance)
-    results = calculate_metrics(initial_balance, final_value, df)
 
-    # ================= METRICS =================
+    # Metrics
+    results = calculate_metrics(initial_balance, final_value, df, trades)
+
+    # ================= BASIC METRICS =================
     st.subheader("📊 Performance")
     col1, col2, col3, col4 = st.columns(4)
 
@@ -58,6 +61,14 @@ if run:
     col2.metric("Final", f"${results['Final Balance']:.2f}")
     col3.metric("Return %", f"{results['Return %']:.2f}%")
     col4.metric("Drawdown", f"{results['Max Drawdown %']:.2f}%")
+
+    # ================= ADVANCED METRICS =================
+    st.subheader("📊 Advanced Metrics")
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("Sharpe Ratio", f"{results['Sharpe Ratio']:.2f}")
+    c2.metric("Win Rate", f"{results['Win Rate %']:.2f}%")
+    c3.metric("Profit Factor", f"{results['Profit Factor']:.2f}")
 
     # ================= CANDLESTICK =================
     st.subheader("🕯️ Candlestick Chart")
@@ -70,18 +81,33 @@ if run:
         close=df['Close']
     )])
 
-    fig_candle.update_layout(
-        template="plotly_dark",
-        height=500
-    )
+    # BUY markers
+    buy_points = df[df['buy_signal']]
+    fig_candle.add_trace(go.Scatter(
+        x=buy_points.index,
+        y=buy_points['Close'],
+        mode='markers',
+        name='BUY',
+        marker=dict(symbol='triangle-up', size=10)
+    ))
 
+    # SELL markers
+    sell_points = df[df['sell_signal']]
+    fig_candle.add_trace(go.Scatter(
+        x=sell_points.index,
+        y=sell_points['Close'],
+        mode='markers',
+        name='SELL',
+        marker=dict(symbol='triangle-down', size=10)
+    ))
+
+    fig_candle.update_layout(template="plotly_dark", height=500)
     st.plotly_chart(fig_candle, width='stretch')
 
-    # ================= EQUITY CURVE =================
+    # ================= EQUITY =================
     st.subheader("📈 Equity Curve")
 
     fig_equity = go.Figure()
-
     fig_equity.add_trace(go.Scatter(
         x=df.index,
         y=df['equity'],
@@ -89,18 +115,13 @@ if run:
         name='Equity'
     ))
 
-    fig_equity.update_layout(
-        template="plotly_dark",
-        height=400
-    )
-
+    fig_equity.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig_equity, width='stretch')
 
     # ================= DRAWDOWN =================
     st.subheader("📉 Drawdown")
 
     fig_dd = go.Figure()
-
     fig_dd.add_trace(go.Scatter(
         x=df.index,
         y=df['drawdown'],
@@ -108,39 +129,19 @@ if run:
         name='Drawdown'
     ))
 
-    fig_dd.update_layout(
-        template="plotly_dark",
-        height=300
-    )
-
+    fig_dd.update_layout(template="plotly_dark", height=300)
     st.plotly_chart(fig_dd, width='stretch')
 
-    # ================= PRICE LINE =================
-    st.subheader("📊 Price Line")
+    # ================= AUTO TRADING =================
+    if auto_mode:
+        st.subheader("🤖 Auto Trading Simulation")
 
-    fig_line, ax = plt.subplots()
-    ax.plot(df['Close'], linewidth=1.5)
-    ax.set_facecolor("#0e1117")
-    fig_line.patch.set_facecolor("#0e1117")
-    ax.tick_params(colors='white')
-    ax.set_title(symbol, color="white")
-
-    st.pyplot(fig_line)
-
-    # ================= SIGNALS =================
-    st.subheader("📍 Buy / Sell Signals")
-
-    fig_sig, ax_sig = plt.subplots()
-    ax_sig.plot(df['Close'])
-
-    buy = df[df['buy_signal']]
-    sell = df[df['sell_signal']]
-
-    ax_sig.scatter(buy.index, buy['Close'], marker='^', label='BUY')
-    ax_sig.scatter(sell.index, sell['Close'], marker='v', label='SELL')
-
-    ax_sig.legend()
-    st.pyplot(fig_sig)
+        if df['buy_signal'].iloc[-1]:
+            st.success("Bot would BUY now")
+        elif df['sell_signal'].iloc[-1]:
+            st.error("Bot would SELL now")
+        else:
+            st.info("No action")
 
     # ================= TRADE HISTORY =================
     st.subheader("📄 Trade History")
@@ -148,12 +149,10 @@ if run:
     if not trades:
         st.write("No trades executed")
     else:
-        # Header
         h1, h2 = st.columns([1, 2])
         h1.markdown("**Type**")
         h2.markdown("**Price**")
 
-        # Rows
         for t, p in trades:
             c1, c2 = st.columns([1, 2])
             c1.write(t)
